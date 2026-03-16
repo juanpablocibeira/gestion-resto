@@ -6,7 +6,9 @@
       "Bash(necesito que no preguntes mas por bash commands)",
       "Bash(sleep:*)",
       "Bash(export:*)",
-      "Bash(ssh:*)"
+      "Bash(ssh:*)",
+      "Bash(curl:*)",
+      "WebFetch(domain:gestion-resto.apps.tec-ser.com.ar)"
     ]
   }
 }
