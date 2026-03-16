@@ -5,7 +5,8 @@
       "Bash(cd:*)",
       "Bash(necesito que no preguntes mas por bash commands)",
       "Bash(sleep:*)",
-      "Bash(export:*)"
+      "Bash(export:*)",
+      "Bash(ssh:*)"
     ]
   }
 }
