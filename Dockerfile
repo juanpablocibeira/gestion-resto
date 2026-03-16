@@ -3,6 +3,8 @@ FROM node:20-alpine AS base
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
+# Force install ALL dependencies including devDependencies
+ENV NODE_ENV=development
 RUN npm ci
 
 FROM base AS builder
@@ -13,8 +15,7 @@ COPY . .
 # Generate Prisma client (doesn't need DB connection)
 RUN npx prisma generate
 
-# Set dummy DATABASE_URL for build - Next.js needs it to compile but won't connect
-# Force dynamic rendering so no DB calls happen at build time
+# Dummy env vars for build - Next.js needs them to compile but won't connect to DB
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
 ENV AUTH_SECRET="build-secret-placeholder"
 ENV NEXT_TELEMETRY_DISABLED=1
