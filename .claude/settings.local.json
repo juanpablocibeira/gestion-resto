@@ -3,7 +3,9 @@
     "allow": [
       "WebSearch",
       "Bash(cd:*)",
-      "Bash(necesito que no preguntes mas por bash commands)"
+      "Bash(necesito que no preguntes mas por bash commands)",
+      "Bash(sleep:*)",
+      "Bash(export:*)"
     ]
   }
 }

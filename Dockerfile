@@ -9,13 +9,17 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# Generate Prisma client (doesn't need DB connection)
 RUN npx prisma generate
-# Skip DB connection during build by setting a dummy URL and disabling telemetry
-ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+
+# Set dummy DATABASE_URL for build - Next.js needs it to compile but won't connect
+# Force dynamic rendering so no DB calls happen at build time
+ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
+ENV AUTH_SECRET="build-secret-placeholder"
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build || true
-# If standalone build failed, ensure the directory exists
-RUN test -d .next/standalone || (echo "Build produced no standalone output" && exit 1)
+
+RUN npm run build
 
 FROM base AS runner
 WORKDIR /app

@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { updateOrderItemStatusSchema } from "@/lib/validators";
 import { sseBroker } from "@/lib/sse";
 
+export const dynamic = "force-dynamic";
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ orderId: string; itemId: string }> }

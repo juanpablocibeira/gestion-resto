@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/permissions";
 import bcrypt from "bcryptjs";
 
+export const dynamic = "force-dynamic";
+
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ userId: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

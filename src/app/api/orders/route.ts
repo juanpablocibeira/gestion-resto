@@ -5,6 +5,8 @@ import { createOrderSchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
 import { sseBroker } from "@/lib/sse";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
