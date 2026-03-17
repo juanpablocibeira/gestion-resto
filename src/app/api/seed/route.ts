@@ -1,11 +1,21 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
 
+export async function GET() {
+  return NextResponse.json({
+    DATABASE_URL: process.env.DATABASE_URL ? "SET (" + process.env.DATABASE_URL.substring(0, 30) + "...)" : "NOT SET",
+    NODE_ENV: process.env.NODE_ENV,
+  });
+}
+
 export async function POST() {
   try {
+    // Import PrismaClient directly here to avoid build-time issues
+    const { PrismaClient } = await import("@/generated/prisma");
+    const prisma = new PrismaClient();
+
     // Create restaurant
     const restaurant = await prisma.restaurant.upsert({
       where: { id: "default-restaurant" },
