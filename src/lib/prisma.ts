@@ -1,28 +1,25 @@
-import { PrismaClient } from "@/generated/prisma";
+let _prisma: any;
 
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
-};
-
-function getPrismaClient(): PrismaClient {
-  if (globalForPrisma.prisma) return globalForPrisma.prisma;
-
-  const client = new PrismaClient();
-
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = client;
+export function getPrisma() {
+  if (!_prisma) {
+    // Dynamic import to avoid module evaluation at build time
+    const { PrismaClient } = require("@/generated/prisma");
+    _prisma = new PrismaClient();
   }
-
-  return client;
+  return _prisma;
 }
 
-export const prisma = new Proxy({} as PrismaClient, {
-  get(_target, prop) {
-    const client = getPrismaClient();
-    const value = (client as Record<string | symbol, unknown>)[prop];
-    if (typeof value === "function") {
-      return value.bind(client);
-    }
-    return value;
-  },
-});
+// Default export as a getter proxy for backward compatibility
+export const prisma = new Proxy(
+  {},
+  {
+    get(_, prop) {
+      const client = getPrisma();
+      const value = client[prop];
+      if (typeof value === "function") {
+        return value.bind(client);
+      }
+      return value;
+    },
+  }
+) as any;
