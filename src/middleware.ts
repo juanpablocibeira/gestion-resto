@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { auth } from "@/lib/auth";
+import { NextResponse } from "next/server";
 
-export async function middleware(req: NextRequest) {
+export default auth((req) => {
   const { pathname } = req.nextUrl;
 
   // Public routes
@@ -9,8 +9,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const token = await getToken({ req, secret: process.env.AUTH_SECRET });
-  const isLoggedIn = !!token;
+  const isLoggedIn = !!req.auth;
 
   if (!isLoggedIn) {
     return NextResponse.redirect(new URL("/login", req.url));
@@ -22,7 +21,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // Role-based route protection
-  const role = token?.role as string | undefined;
+  const role = req.auth?.user?.role;
 
   if (pathname.startsWith("/floor/editor") && !["ADMIN", "MANAGER"].includes(role || "")) {
     return NextResponse.redirect(new URL("/floor", req.url));
@@ -37,7 +36,7 @@ export async function middleware(req: NextRequest) {
   }
 
   return NextResponse.next();
-}
+});
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth|api/sse).*)"],
