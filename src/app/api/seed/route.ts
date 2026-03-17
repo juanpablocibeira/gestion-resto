@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -12,9 +13,6 @@ export async function GET() {
 
 export async function POST() {
   try {
-    // Import PrismaClient directly here to avoid build-time issues
-    const { PrismaClient } = await import("@/generated/prisma");
-    const prisma = new PrismaClient();
 
     // Create restaurant
     const restaurant = await prisma.restaurant.upsert({
