@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq } from "drizzle-orm";
+import { floorPlans } from "@/db/schema";
 import { floorPlanSchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
 
@@ -10,9 +12,9 @@ export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const plans = await prisma.floorPlan.findMany({
-    where: { restaurantId: session.user.restaurantId },
-    include: { tables: true },
+  const plans = await db.query.floorPlans.findMany({
+    where: eq(floorPlans.restaurantId, session.user.restaurantId),
+    with: { tables: true },
   });
   return NextResponse.json(plans);
 }
@@ -28,9 +30,14 @@ export async function POST(req: NextRequest) {
   const parsed = floorPlanSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const plan = await prisma.floorPlan.create({
-    data: { ...parsed.data, restaurantId: session.user.restaurantId },
-    include: { tables: true },
+  const [plan] = await db
+    .insert(floorPlans)
+    .values({ ...parsed.data, restaurantId: session.user.restaurantId })
+    .returning();
+
+  const full = await db.query.floorPlans.findFirst({
+    where: eq(floorPlans.id, plan.id),
+    with: { tables: true },
   });
-  return NextResponse.json(plan, { status: 201 });
+  return NextResponse.json(full, { status: 201 });
 }

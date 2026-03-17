@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq, asc } from "drizzle-orm";
+import { users } from "@/db/schema";
 import { userSchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
 import bcrypt from "bcryptjs";
@@ -14,9 +16,9 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const users = await prisma.user.findMany({
-    where: { restaurantId: session.user.restaurantId },
-    select: {
+  const result = await db.query.users.findMany({
+    where: eq(users.restaurantId, session.user.restaurantId),
+    columns: {
       id: true,
       email: true,
       name: true,
@@ -25,9 +27,9 @@ export async function GET() {
       active: true,
       createdAt: true,
     },
-    orderBy: { name: "asc" },
+    orderBy: asc(users.name),
   });
-  return NextResponse.json(users);
+  return NextResponse.json(result);
 }
 
 export async function POST(req: NextRequest) {
@@ -41,29 +43,31 @@ export async function POST(req: NextRequest) {
   const parsed = userSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const existing = await prisma.user.findUnique({ where: { email: parsed.data.email } });
+  const existing = await db.query.users.findFirst({
+    where: eq(users.email, parsed.data.email),
+  });
   if (existing) return NextResponse.json({ error: "Email already in use" }, { status: 409 });
 
   const passwordHash = await bcrypt.hash(parsed.data.password, 10);
 
-  const user = await prisma.user.create({
-    data: {
+  const [user] = await db
+    .insert(users)
+    .values({
       email: parsed.data.email,
       name: parsed.data.name,
       passwordHash,
       pin: parsed.data.pin,
       role: parsed.data.role,
       restaurantId: session.user.restaurantId,
-    },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      role: true,
-      pin: true,
-      active: true,
-      createdAt: true,
-    },
-  });
+    })
+    .returning({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      role: users.role,
+      pin: users.pin,
+      active: users.active,
+      createdAt: users.createdAt,
+    });
   return NextResponse.json(user, { status: 201 });
 }

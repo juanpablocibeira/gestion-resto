@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq, and, gte, desc, inArray } from "drizzle-orm";
+import { orders, orderItems, products, tableSessions } from "@/db/schema";
 import { createOrderSchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
 import { sseBroker } from "@/lib/sse";
@@ -15,20 +17,20 @@ export async function GET(req: NextRequest) {
   const sessionId = searchParams.get("sessionId");
   const status = searchParams.get("status");
 
-  const orders = await prisma.order.findMany({
-    where: {
-      restaurantId: session.user.restaurantId,
-      ...(sessionId ? { sessionId } : {}),
-      ...(status ? { status: status as any } : {}),
+  const conditions = [eq(orders.restaurantId, session.user.restaurantId)];
+  if (sessionId) conditions.push(eq(orders.sessionId, sessionId));
+  if (status) conditions.push(eq(orders.status, status as any));
+
+  const result = await db.query.orders.findMany({
+    where: and(...conditions),
+    with: {
+      items: { with: { product: true } },
+      session: { with: { table: true } },
+      waiter: { columns: { name: true } },
     },
-    include: {
-      items: { include: { product: true } },
-      session: { include: { table: true } },
-      waiter: { select: { name: true } },
-    },
-    orderBy: { createdAt: "desc" },
+    orderBy: desc(orders.createdAt),
   });
-  return NextResponse.json(orders);
+  return NextResponse.json(result);
 }
 
 export async function POST(req: NextRequest) {
@@ -45,76 +47,89 @@ export async function POST(req: NextRequest) {
   // Get daily sequential order number
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const lastOrder = await prisma.order.findFirst({
-    where: {
-      restaurantId: session.user.restaurantId,
-      createdAt: { gte: today },
-    },
-    orderBy: { orderNumber: "desc" },
+  const lastOrder = await db.query.orders.findFirst({
+    where: and(
+      eq(orders.restaurantId, session.user.restaurantId),
+      gte(orders.createdAt, today)
+    ),
+    orderBy: desc(orders.orderNumber),
   });
   const orderNumber = (lastOrder?.orderNumber ?? 0) + 1;
 
   // Fetch product prices
   const productIds = parsed.data.items.map((i) => i.productId);
-  const products = await prisma.product.findMany({
-    where: { id: { in: productIds }, restaurantId: session.user.restaurantId },
+  const prods = await db.query.products.findMany({
+    where: and(
+      inArray(products.id, productIds),
+      eq(products.restaurantId, session.user.restaurantId)
+    ),
   });
-  const priceMap = new Map(products.map((p) => [p.id, p.price]));
+  const priceMap = new Map(prods.map((p) => [p.id, p.price]));
 
-  const order = await prisma.order.create({
-    data: {
+  // Create order
+  const [order] = await db
+    .insert(orders)
+    .values({
       orderNumber,
       sessionId: parsed.data.sessionId,
       waiterId: session.user.id,
       restaurantId: session.user.restaurantId,
       status: "SENT",
       notes: parsed.data.notes,
-      items: {
-        create: parsed.data.items.map((item) => ({
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: priceMap.get(item.productId) ?? 0,
-          notes: item.notes,
-          status: "PENDING",
-        })),
-      },
-    },
-    include: {
-      items: { include: { product: true } },
-      session: { include: { table: true } },
-      waiter: { select: { name: true } },
-    },
-  });
+    })
+    .returning();
+
+  // Create order items
+  await db.insert(orderItems).values(
+    parsed.data.items.map((item) => ({
+      orderId: order.id,
+      productId: item.productId,
+      quantity: item.quantity,
+      unitPrice: priceMap.get(item.productId) ?? 0,
+      notes: item.notes,
+      status: "PENDING" as const,
+    }))
+  );
 
   // Update session status
-  await prisma.tableSession.update({
-    where: { id: parsed.data.sessionId },
-    data: { status: "WAITING_FOOD" },
+  await db
+    .update(tableSessions)
+    .set({ status: "WAITING_FOOD" })
+    .where(eq(tableSessions.id, parsed.data.sessionId));
+
+  // Fetch full order with relations
+  const full = await db.query.orders.findFirst({
+    where: eq(orders.id, order.id),
+    with: {
+      items: { with: { product: true } },
+      session: { with: { table: true } },
+      waiter: { columns: { name: true } },
+    },
   });
 
   // Broadcast to kitchen
   sseBroker.publish(`kitchen:${session.user.restaurantId}`, "order:new", {
-    id: order.id,
-    orderNumber: order.orderNumber,
-    tableLabel: order.session.table.label,
-    waiterName: order.waiter.name,
-    items: order.items.map((i) => ({
+    id: full!.id,
+    orderNumber: full!.orderNumber,
+    tableLabel: full!.session.table.label,
+    waiterName: full!.waiter.name,
+    items: full!.items.map((i) => ({
       id: i.id,
       productName: i.product.name,
       quantity: i.quantity,
       notes: i.notes,
       status: i.status,
     })),
-    notes: order.notes,
-    createdAt: order.createdAt,
+    notes: full!.notes,
+    createdAt: full!.createdAt,
   });
 
   // Broadcast floor update
   sseBroker.publish(`floor:${session.user.restaurantId}`, "session:update", {
     sessionId: parsed.data.sessionId,
-    tableId: order.session.table.id,
+    tableId: full!.session.table.id,
     status: "WAITING_FOOD",
   });
 
-  return NextResponse.json(order, { status: 201 });
+  return NextResponse.json(full, { status: 201 });
 }

@@ -1,7 +1,9 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
-import { prisma } from "./prisma";
+import { db } from "@/db";
+import { eq, and } from "drizzle-orm";
+import { users } from "@/db/schema";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   session: { strategy: "jwt" },
@@ -19,8 +21,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       async authorize(credentials) {
         if (credentials?.pin) {
           // PIN login for tablets
-          const user = await prisma.user.findFirst({
-            where: { pin: credentials.pin as string, active: true },
+          const user = await db.query.users.findFirst({
+            where: and(
+              eq(users.pin, credentials.pin as string),
+              eq(users.active, true)
+            ),
           });
           if (!user) return null;
           return {
@@ -34,8 +39,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         if (!credentials?.email || !credentials?.password) return null;
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email as string },
+        const user = await db.query.users.findFirst({
+          where: eq(users.email, credentials.email as string),
         });
         if (!user || !user.active) return null;
 

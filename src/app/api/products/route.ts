@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq, and, asc } from "drizzle-orm";
+import { products } from "@/db/schema";
 import { productSchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
 
@@ -13,15 +15,16 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const categoryId = searchParams.get("categoryId");
 
-  const products = await prisma.product.findMany({
-    where: {
-      restaurantId: session.user.restaurantId,
-      ...(categoryId ? { categoryId } : {}),
-    },
-    include: { category: true },
-    orderBy: { name: "asc" },
+  const where = categoryId
+    ? and(eq(products.restaurantId, session.user.restaurantId), eq(products.categoryId, categoryId))
+    : eq(products.restaurantId, session.user.restaurantId);
+
+  const result = await db.query.products.findMany({
+    where,
+    with: { category: true },
+    orderBy: asc(products.name),
   });
-  return NextResponse.json(products);
+  return NextResponse.json(result);
 }
 
 export async function POST(req: NextRequest) {
@@ -35,9 +38,14 @@ export async function POST(req: NextRequest) {
   const parsed = productSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const product = await prisma.product.create({
-    data: { ...parsed.data, restaurantId: session.user.restaurantId },
-    include: { category: true },
+  const [product] = await db
+    .insert(products)
+    .values({ ...parsed.data, restaurantId: session.user.restaurantId })
+    .returning();
+
+  const full = await db.query.products.findFirst({
+    where: eq(products.id, product.id),
+    with: { category: true },
   });
-  return NextResponse.json(product, { status: 201 });
+  return NextResponse.json(full, { status: 201 });
 }

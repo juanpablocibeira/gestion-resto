@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq, and } from "drizzle-orm";
+import { tableSessions } from "@/db/schema";
 import { sseBroker } from "@/lib/sse";
 
 export const dynamic = "force-dynamic";
@@ -10,16 +12,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ sess
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { sessionId } = await params;
 
-  const tableSession = await prisma.tableSession.findFirst({
-    where: { id: sessionId, restaurantId: session.user.restaurantId },
-    include: {
+  const tableSession = await db.query.tableSessions.findFirst({
+    where: and(eq(tableSessions.id, sessionId), eq(tableSessions.restaurantId, session.user.restaurantId)),
+    with: {
       table: true,
-      waiter: { select: { name: true } },
+      waiter: { columns: { name: true } },
       orders: {
-        include: { items: { include: { product: true } } },
-        orderBy: { createdAt: "desc" },
+        with: { items: { with: { product: true } } },
+        orderBy: (orders, { desc }) => [desc(orders.createdAt)],
       },
-      bills: { include: { items: true } },
+      bills: { with: { items: true } },
     },
   });
   if (!tableSession) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -39,14 +41,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ se
     updateData.closedAt = new Date();
   }
 
-  await prisma.tableSession.updateMany({
-    where: { id: sessionId, restaurantId: session.user.restaurantId },
-    data: updateData,
-  });
+  const result = await db
+    .update(tableSessions)
+    .set(updateData)
+    .where(and(eq(tableSessions.id, sessionId), eq(tableSessions.restaurantId, session.user.restaurantId)))
+    .returning();
 
-  const updated = await prisma.tableSession.findUnique({
-    where: { id: sessionId },
-    include: { table: true },
+  const updated = await db.query.tableSessions.findFirst({
+    where: eq(tableSessions.id, sessionId),
+    with: { table: true },
   });
 
   sseBroker.publish(`floor:${session.user.restaurantId}`, "session:update", {

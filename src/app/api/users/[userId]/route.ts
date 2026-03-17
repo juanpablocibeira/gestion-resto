@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq, and } from "drizzle-orm";
+import { users } from "@/db/schema";
 import { hasPermission } from "@/lib/permissions";
 import bcrypt from "bcryptjs";
 
@@ -15,7 +17,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ user
   const { userId } = await params;
 
   const body = await req.json();
-  const updateData: Record<string, unknown> = {};
+  const updateData: Record<string, unknown> = { updatedAt: new Date() };
 
   if (body.name) updateData.name = body.name;
   if (body.email) updateData.email = body.email;
@@ -26,16 +28,21 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ user
     updateData.passwordHash = await bcrypt.hash(body.password, 10);
   }
 
-  await prisma.user.updateMany({
-    where: { id: userId, restaurantId: session.user.restaurantId },
-    data: updateData,
-  });
-
-  const updated = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, email: true, name: true, role: true, pin: true, active: true, createdAt: true },
-  });
-  return NextResponse.json(updated);
+  const result = await db
+    .update(users)
+    .set(updateData)
+    .where(and(eq(users.id, userId), eq(users.restaurantId, session.user.restaurantId)))
+    .returning({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      role: users.role,
+      pin: users.pin,
+      active: users.active,
+      createdAt: users.createdAt,
+    });
+  if (result.length === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json(result[0]);
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ userId: string }> }) {
@@ -47,9 +54,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ u
   const { userId } = await params;
 
   // Soft delete: deactivate instead of deleting
-  await prisma.user.updateMany({
-    where: { id: userId, restaurantId: session.user.restaurantId },
-    data: { active: false },
-  });
+  await db
+    .update(users)
+    .set({ active: false, updatedAt: new Date() })
+    .where(and(eq(users.id, userId), eq(users.restaurantId, session.user.restaurantId)));
   return NextResponse.json({ ok: true });
 }

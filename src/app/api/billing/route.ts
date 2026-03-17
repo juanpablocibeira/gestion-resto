@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq } from "drizzle-orm";
+import { bills, billItems, tableSessions } from "@/db/schema";
 import { createBillSchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
 
@@ -24,31 +26,40 @@ export async function POST(req: NextRequest) {
   const tax = 0; // Configure tax rate in settings
   const total = subtotal + tax;
 
-  const bill = await prisma.bill.create({
-    data: {
+  // Create bill
+  const [bill] = await db
+    .insert(bills)
+    .values({
       sessionId: parsed.data.sessionId,
       restaurantId: session.user.restaurantId,
       subtotal,
       tax,
       total,
-      items: {
-        create: parsed.data.items.map((item) => ({
-          orderId: item.orderId,
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          total: item.unitPrice * item.quantity,
-        })),
-      },
-    },
-    include: { items: true },
-  });
+    })
+    .returning();
+
+  // Create bill items
+  await db.insert(billItems).values(
+    parsed.data.items.map((item) => ({
+      billId: bill.id,
+      orderId: item.orderId,
+      productId: item.productId,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      total: item.unitPrice * item.quantity,
+    }))
+  );
 
   // Update session status
-  await prisma.tableSession.update({
-    where: { id: parsed.data.sessionId },
-    data: { status: "WAITING_BILL" },
+  await db
+    .update(tableSessions)
+    .set({ status: "WAITING_BILL" })
+    .where(eq(tableSessions.id, parsed.data.sessionId));
+
+  const full = await db.query.bills.findFirst({
+    where: eq(bills.id, bill.id),
+    with: { items: true },
   });
 
-  return NextResponse.json(bill, { status: 201 });
+  return NextResponse.json(full, { status: 201 });
 }

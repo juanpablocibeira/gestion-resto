@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq, and } from "drizzle-orm";
+import { orders } from "@/db/schema";
 import { sseBroker } from "@/lib/sse";
 
 export const dynamic = "force-dynamic";
@@ -10,12 +12,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ orde
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { orderId } = await params;
 
-  const order = await prisma.order.findFirst({
-    where: { id: orderId, restaurantId: session.user.restaurantId },
-    include: {
-      items: { include: { product: true } },
-      session: { include: { table: true } },
-      waiter: { select: { name: true } },
+  const order = await db.query.orders.findFirst({
+    where: and(eq(orders.id, orderId), eq(orders.restaurantId, session.user.restaurantId)),
+    with: {
+      items: { with: { product: true } },
+      session: { with: { table: true } },
+      waiter: { columns: { name: true } },
     },
   });
   if (!order) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -30,17 +32,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ or
   const body = await req.json();
   const { status } = body;
 
-  await prisma.order.updateMany({
-    where: { id: orderId, restaurantId: session.user.restaurantId },
-    data: { status },
-  });
+  await db
+    .update(orders)
+    .set({ status, updatedAt: new Date() })
+    .where(and(eq(orders.id, orderId), eq(orders.restaurantId, session.user.restaurantId)));
 
-  const updated = await prisma.order.findUnique({
-    where: { id: orderId },
-    include: {
-      items: { include: { product: true } },
-      session: { include: { table: true } },
-      waiter: { select: { name: true } },
+  const updated = await db.query.orders.findFirst({
+    where: eq(orders.id, orderId),
+    with: {
+      items: { with: { product: true } },
+      session: { with: { table: true } },
+      waiter: { columns: { name: true } },
     },
   });
 

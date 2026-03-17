@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq, and } from "drizzle-orm";
+import { floorPlans } from "@/db/schema";
 import { floorPlanSchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
 
@@ -11,9 +13,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ plan
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { planId } = await params;
 
-  const plan = await prisma.floorPlan.findFirst({
-    where: { id: planId, restaurantId: session.user.restaurantId },
-    include: { tables: true },
+  const plan = await db.query.floorPlans.findFirst({
+    where: and(eq(floorPlans.id, planId), eq(floorPlans.restaurantId, session.user.restaurantId)),
+    with: { tables: true },
   });
   if (!plan) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(plan);
@@ -31,11 +33,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ plan
   const parsed = floorPlanSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  await prisma.floorPlan.updateMany({
-    where: { id: planId, restaurantId: session.user.restaurantId },
-    data: parsed.data,
+  const result = await db
+    .update(floorPlans)
+    .set({ ...parsed.data, updatedAt: new Date() })
+    .where(and(eq(floorPlans.id, planId), eq(floorPlans.restaurantId, session.user.restaurantId)))
+    .returning();
+  if (result.length === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const updated = await db.query.floorPlans.findFirst({
+    where: eq(floorPlans.id, planId),
+    with: { tables: true },
   });
-  const updated = await prisma.floorPlan.findUnique({ where: { id: planId }, include: { tables: true } });
   return NextResponse.json(updated);
 }
 
@@ -47,8 +55,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
   }
   const { planId } = await params;
 
-  await prisma.floorPlan.deleteMany({
-    where: { id: planId, restaurantId: session.user.restaurantId },
-  });
+  await db
+    .delete(floorPlans)
+    .where(and(eq(floorPlans.id, planId), eq(floorPlans.restaurantId, session.user.restaurantId)));
   return NextResponse.json({ ok: true });
 }

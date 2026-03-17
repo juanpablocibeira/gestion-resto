@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import {
+  restaurants,
+  users,
+  categories,
+  products,
+  floorPlans,
+  restaurantTables,
+} from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -13,66 +21,74 @@ export async function GET() {
 
 export async function POST() {
   try {
-
     // Create restaurant
-    const restaurant = await prisma.restaurant.upsert({
-      where: { id: "default-restaurant" },
-      update: {},
-      create: {
+    const [restaurant] = await db
+      .insert(restaurants)
+      .values({
         id: "default-restaurant",
         name: "Mi Restaurante",
         address: "Calle Principal 123",
         phone: "+54 11 1234-5678",
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: restaurants.id,
+        set: { name: "Mi Restaurante" },
+      })
+      .returning();
 
     // Create admin user
     const adminHash = await bcrypt.hash("admin123", 10);
-    await prisma.user.upsert({
-      where: { email: "admin@resto.com" },
-      update: {},
-      create: {
+    await db
+      .insert(users)
+      .values({
         email: "admin@resto.com",
         name: "Administrador",
         passwordHash: adminHash,
         pin: "0000",
         role: "ADMIN",
         restaurantId: restaurant.id,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: users.email,
+        set: { name: "Administrador", passwordHash: adminHash, pin: "0000", role: "ADMIN" },
+      });
 
     // Create waiter
     const waiterHash = await bcrypt.hash("mozo123", 10);
-    await prisma.user.upsert({
-      where: { email: "mozo@resto.com" },
-      update: {},
-      create: {
+    await db
+      .insert(users)
+      .values({
         email: "mozo@resto.com",
         name: "Carlos Mozo",
         passwordHash: waiterHash,
         pin: "1234",
         role: "WAITER",
         restaurantId: restaurant.id,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: users.email,
+        set: { name: "Carlos Mozo", passwordHash: waiterHash, pin: "1234", role: "WAITER" },
+      });
 
     // Create cashier
     const cashierHash = await bcrypt.hash("cajero123", 10);
-    await prisma.user.upsert({
-      where: { email: "cajero@resto.com" },
-      update: {},
-      create: {
+    await db
+      .insert(users)
+      .values({
         email: "cajero@resto.com",
         name: "Maria Cajera",
         passwordHash: cashierHash,
         pin: "5678",
         role: "CASHIER",
         restaurantId: restaurant.id,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: users.email,
+        set: { name: "Maria Cajera", passwordHash: cashierHash, pin: "5678", role: "CASHIER" },
+      });
 
     // Create categories
-    const categories = [
+    const categoryList = [
       { id: "cat-bebidas", name: "Bebidas", sortOrder: 1 },
       { id: "cat-entradas", name: "Entradas", sortOrder: 2 },
       { id: "cat-principales", name: "Principales", sortOrder: 3 },
@@ -80,16 +96,18 @@ export async function POST() {
       { id: "cat-guarniciones", name: "Guarniciones", sortOrder: 5 },
     ];
 
-    for (const cat of categories) {
-      await prisma.category.upsert({
-        where: { id: cat.id },
-        update: {},
-        create: { ...cat, restaurantId: restaurant.id },
-      });
+    for (const cat of categoryList) {
+      await db
+        .insert(categories)
+        .values({ ...cat, restaurantId: restaurant.id })
+        .onConflictDoUpdate({
+          target: categories.id,
+          set: { name: cat.name, sortOrder: cat.sortOrder },
+        });
     }
 
     // Create products
-    const products = [
+    const productList = [
       { name: "Coca-Cola", price: 2500, categoryId: "cat-bebidas", printInKitchen: false },
       { name: "Agua Mineral", price: 1800, categoryId: "cat-bebidas", printInKitchen: false },
       { name: "Cerveza Artesanal", price: 4500, categoryId: "cat-bebidas", printInKitchen: false },
@@ -113,37 +131,42 @@ export async function POST() {
       { name: "Puré de Papas", price: 3500, categoryId: "cat-guarniciones", printInKitchen: true },
     ];
 
-    for (const prod of products) {
+    for (const prod of productList) {
       const id = `prod-${prod.name.toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
-      await prisma.product.upsert({
-        where: { id },
-        update: {},
-        create: {
+      await db
+        .insert(products)
+        .values({
           id,
           name: prod.name,
           price: prod.price,
           printInKitchen: prod.printInKitchen,
           categoryId: prod.categoryId,
           restaurantId: restaurant.id,
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: products.id,
+          set: { name: prod.name, price: prod.price, printInKitchen: prod.printInKitchen },
+        });
     }
 
     // Create floor plan
-    const floorPlan = await prisma.floorPlan.upsert({
-      where: { id: "default-floor" },
-      update: {},
-      create: {
+    const [floorPlan] = await db
+      .insert(floorPlans)
+      .values({
         id: "default-floor",
         name: "Salón Principal",
         width: 1200,
         height: 800,
         restaurantId: restaurant.id,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: floorPlans.id,
+        set: { name: "Salón Principal" },
+      })
+      .returning();
 
     // Create tables
-    const tables = [
+    const tableList = [
       { label: "1", x: 100, y: 100, width: 80, height: 80, shape: "SQUARE" as const, seats: 4 },
       { label: "2", x: 250, y: 100, width: 80, height: 80, shape: "SQUARE" as const, seats: 4 },
       { label: "3", x: 400, y: 100, width: 80, height: 80, shape: "SQUARE" as const, seats: 4 },
@@ -155,17 +178,19 @@ export async function POST() {
       { label: "9", x: 450, y: 500, width: 160, height: 80, shape: "RECTANGLE" as const, seats: 10 },
     ];
 
-    for (const table of tables) {
-      await prisma.restaurantTable.upsert({
-        where: { id: `table-${table.label}` },
-        update: {},
-        create: {
+    for (const table of tableList) {
+      await db
+        .insert(restaurantTables)
+        .values({
           id: `table-${table.label}`,
           ...table,
           floorPlanId: floorPlan.id,
           restaurantId: restaurant.id,
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: restaurantTables.id,
+          set: table,
+        });
     }
 
     return NextResponse.json({
@@ -174,9 +199,9 @@ export async function POST() {
       data: {
         restaurant: restaurant.name,
         users: 3,
-        categories: categories.length,
-        products: products.length,
-        tables: tables.length,
+        categories: categoryList.length,
+        products: productList.length,
+        tables: tableList.length,
       },
     });
   } catch (error) {

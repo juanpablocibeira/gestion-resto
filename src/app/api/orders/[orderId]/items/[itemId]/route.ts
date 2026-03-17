@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq } from "drizzle-orm";
+import { orderItems, orders } from "@/db/schema";
 import { updateOrderItemStatusSchema } from "@/lib/validators";
 import { sseBroker } from "@/lib/sse";
 
@@ -19,14 +21,14 @@ export async function PATCH(
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   // Update the item
-  await prisma.orderItem.update({
-    where: { id: itemId },
-    data: { status: parsed.data.status },
-  });
+  await db
+    .update(orderItems)
+    .set({ status: parsed.data.status, updatedAt: new Date() })
+    .where(eq(orderItems.id, itemId));
 
   // Check if all items in the order are ready
-  const allItems = await prisma.orderItem.findMany({
-    where: { orderId },
+  const allItems = await db.query.orderItems.findMany({
+    where: eq(orderItems.orderId, orderId),
   });
 
   const allReady = allItems.every(
@@ -34,14 +36,14 @@ export async function PATCH(
   );
 
   if (allReady) {
-    await prisma.order.update({
-      where: { id: orderId },
-      data: { status: "READY" },
-    });
+    await db
+      .update(orders)
+      .set({ status: "READY", updatedAt: new Date() })
+      .where(eq(orders.id, orderId));
 
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: { session: { include: { table: true } } },
+    const order = await db.query.orders.findFirst({
+      where: eq(orders.id, orderId),
+      with: { session: { with: { table: true } } },
     });
 
     if (order) {
@@ -60,9 +62,9 @@ export async function PATCH(
   }
 
   // Broadcast item update to kitchen
-  const updatedItem = await prisma.orderItem.findUnique({
-    where: { id: itemId },
-    include: { product: true },
+  const updatedItem = await db.query.orderItems.findFirst({
+    where: eq(orderItems.id, itemId),
+    with: { product: true },
   });
 
   sseBroker.publish(`kitchen:${session.user.restaurantId}`, "item:update", {

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq, and, ne } from "drizzle-orm";
+import { tableSessions } from "@/db/schema";
 import { openSessionSchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
 import { sseBroker } from "@/lib/sse";
@@ -19,29 +21,37 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   // Check if table already has an open session
-  const existing = await prisma.tableSession.findFirst({
-    where: { tableId: parsed.data.tableId, status: { not: "CLOSED" } },
+  const existing = await db.query.tableSessions.findFirst({
+    where: and(
+      eq(tableSessions.tableId, parsed.data.tableId),
+      ne(tableSessions.status, "CLOSED")
+    ),
   });
   if (existing) {
     return NextResponse.json({ error: "Table already has an open session" }, { status: 409 });
   }
 
-  const tableSession = await prisma.tableSession.create({
-    data: {
+  const [tableSession] = await db
+    .insert(tableSessions)
+    .values({
       tableId: parsed.data.tableId,
       waiterId: session.user.id,
       restaurantId: session.user.restaurantId,
       guests: parsed.data.guests,
-    },
-    include: { table: true, waiter: { select: { name: true } } },
+    })
+    .returning();
+
+  const full = await db.query.tableSessions.findFirst({
+    where: eq(tableSessions.id, tableSession.id),
+    with: { table: true, waiter: { columns: { name: true } } },
   });
 
   sseBroker.publish(`floor:${session.user.restaurantId}`, "session:open", {
     tableId: parsed.data.tableId,
     sessionId: tableSession.id,
-    waiterName: tableSession.waiter.name,
+    waiterName: full!.waiter.name,
     guests: parsed.data.guests,
   });
 
-  return NextResponse.json(tableSession, { status: 201 });
+  return NextResponse.json(full, { status: 201 });
 }

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq, and } from "drizzle-orm";
+import { categories } from "@/db/schema";
 import { categorySchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
 
@@ -11,9 +13,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ cate
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { categoryId } = await params;
 
-  const category = await prisma.category.findFirst({
-    where: { id: categoryId, restaurantId: session.user.restaurantId },
-    include: { products: true },
+  const category = await db.query.categories.findFirst({
+    where: and(eq(categories.id, categoryId), eq(categories.restaurantId, session.user.restaurantId)),
+    with: { products: true },
   });
   if (!category) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(category);
@@ -31,14 +33,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ cate
   const parsed = categorySchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const category = await prisma.category.updateMany({
-    where: { id: categoryId, restaurantId: session.user.restaurantId },
-    data: parsed.data,
-  });
-  if (category.count === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-  const updated = await prisma.category.findUnique({ where: { id: categoryId } });
-  return NextResponse.json(updated);
+  const result = await db
+    .update(categories)
+    .set({ ...parsed.data, updatedAt: new Date() })
+    .where(and(eq(categories.id, categoryId), eq(categories.restaurantId, session.user.restaurantId)))
+    .returning();
+  if (result.length === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json(result[0]);
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ categoryId: string }> }) {
@@ -49,8 +50,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ c
   }
   const { categoryId } = await params;
 
-  await prisma.category.deleteMany({
-    where: { id: categoryId, restaurantId: session.user.restaurantId },
-  });
+  await db
+    .delete(categories)
+    .where(and(eq(categories.id, categoryId), eq(categories.restaurantId, session.user.restaurantId)));
   return NextResponse.json({ ok: true });
 }

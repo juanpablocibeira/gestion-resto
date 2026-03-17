@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/db";
+import { eq, and, ne } from "drizzle-orm";
+import { restaurantTables, tableSessions } from "@/db/schema";
 import { tableSchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
 
@@ -13,16 +15,17 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const floorPlanId = searchParams.get("floorPlanId");
 
-  const tables = await prisma.restaurantTable.findMany({
-    where: {
-      restaurantId: session.user.restaurantId,
-      ...(floorPlanId ? { floorPlanId } : {}),
-    },
-    include: {
+  const where = floorPlanId
+    ? and(eq(restaurantTables.restaurantId, session.user.restaurantId), eq(restaurantTables.floorPlanId, floorPlanId))
+    : eq(restaurantTables.restaurantId, session.user.restaurantId);
+
+  const tables = await db.query.restaurantTables.findMany({
+    where,
+    with: {
       sessions: {
-        where: { status: { not: "CLOSED" } },
-        include: { waiter: { select: { name: true } } },
-        take: 1,
+        where: ne(tableSessions.status, "CLOSED"),
+        with: { waiter: { columns: { name: true } } },
+        limit: 1,
       },
     },
   });
@@ -40,8 +43,9 @@ export async function POST(req: NextRequest) {
   const parsed = tableSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const table = await prisma.restaurantTable.create({
-    data: { ...parsed.data, restaurantId: session.user.restaurantId },
-  });
+  const [table] = await db
+    .insert(restaurantTables)
+    .values({ ...parsed.data, restaurantId: session.user.restaurantId })
+    .returning();
   return NextResponse.json(table, { status: 201 });
 }
